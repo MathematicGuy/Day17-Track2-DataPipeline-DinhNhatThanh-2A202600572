@@ -1,0 +1,178 @@
+=== Day 17 pipeline (lite) ===
+  bronze rows in      : 13
+  duplicates dropped  : 5  (Silver dedup)
+  records quarantined : 3  (failed the gate)
+  silver rows         : 8
+  gold daily rows     : 5
+
+Gold (completed orders by day):
+order_date  n_orders  n_users  revenue  avg_order_value
+2026-06-01         2        2    69.49            34.74
+2026-06-02         1        1    19.99            19.99
+2026-06-03         1        1    49.50            49.50
+2026-06-04         1        1     5.00             5.00
+2026-06-06         1        1    49.50            49.50
+=== Day 17 flywheel: agent traces -> datasets ===
+  spans landed in Bronze   : 21 (from 8 traces)
+  eval golden rows         : 2  -> eval_golden.jsonl
+  preference pairs (raw)   : 3
+  preference pairs (clean) : 1  -> preference_pairs.jsonl  (2 dropped by decontamination)   
+
+Per-trace summary (the analyst view):
+trace_id                                  user_input                                        
+                                             agent_output outcome  total_tokens  latency_ms  n_spans
+   t0001 Can I return a widget I bought 10 days ago? Yes. Widgets can be returned within 30 days for a full refund, so a 10-day-old widget qualifies.      ok         578.0        1840        3
+   t0002           What warranty does a gadget have?                          Gadgets carry a 90-day limited warranty covering manufacturing defects.      ok         534.0        2110        3
+   t0003 Can I return a widget I bought 10 days ago?                 Sorry, I could not look up the returns policy right now. Please try again later.   error           0.0         980        2
+   t0004                   Are sprockets returnable?                                 No. Sprockets are final sale and cannot be returned once opened.      ok         524.0        1520        3
+   t0005           What warranty does a gadget have?                                        
+                         I am not able to help with that.   error         499.0         760        2
+   t0006            How long is the gadget warranty?                        A gadget has a 90-day limited warranty that covers manufacturing defects.      ok         548.0        1990        3
+   t0007  Do you accept returns on opened sprockets?                                No. Once opened, sprockets are final sale and cannot be returned.      ok         530.0        1610        3
+   t0008  Do you accept returns on opened sprockets?                                   Sure! You can return opened sprockets any time within 30 days.   error         511.0         890        2
+
+Point-in-time features (ASOF, correct) vs naive (leaky):
+user_id            event_ts  spend_at_event  spend_leaky
+   u100 2026-06-01 10:00:00            50.0        300.0
+   u100 2026-06-03 09:00:00           120.0        300.0
+   u101 2026-06-02 12:00:00            20.0         20.0
+
+  rows where the naive join LEAKED a future value: 2
+=== Day 17 bonus: Knowledge Graph vs Vector RAG ===
+  nodes (entities): 5
+    (accessory) -[SHIPS_FROM]-> (hanoi fulfillment center)
+    (gadget) -[IS_A]-> (accessory)
+    (gadget) -[HAS_WARRANTY]-> (90 days)
+    (industrial-part) -[SHIPS_FROM]-> (hai phong fulfillment center)
+    (sprocket) -[IS_A]-> (industrial-part)
+    (sprocket) -[NON_RETURNABLE]-> (final sale)
+    (widget) -[IS_A]-> (accessory)
+    (widget) -[RETURNABLE_WITHIN]-> (30 days)
+
+  Q: 'Where does a widget ship from?'
+
+  [Vector RAG] flat chunk retrieval:
+    chunk mentioning 'widget' : 'Widgets and gadgets belong to the accessory category.'     
+    chunk mentioning 'hanoi'  : 'Accessories ship from the Hanoi fulfillment center.'       
+    one chunk that answers it (has BOTH): False  => flat retrieval CANNOT bridge the two facts
+
+  [Knowledge graph] multi-hop traverse:
+    widget  ->  accessory  ->  hanoi fulfillment center   (2 hops)  => hanoi fulfillment center
+
+  1-hop  widget / RETURNABLE_WITHIN : [('RETURNABLE_WITHIN', '30 days')]
+  multi-node 'what is returnable?'  : ['widget']
+04:03:22  Running with dbt=1.11.11
+04:03:23  Registered adapter: duckdb=1.10.1
+04:03:24  Found 2 models, 1 seed, 7 data tests, 485 macros, 1 unit test
+04:03:24  
+04:03:24  Concurrency: 1 threads (target='dev')
+04:03:24
+04:03:24  1 of 11 START seed file main.raw_orders ........................................ [RUN]
+04:03:24  1 of 11 OK loaded seed file main.raw_orders .................................... [INSERT 16 in 0.09s]
+04:03:24  2 of 11 START unit_test stg_orders::stg_orders_dedups_on_order_id .............. [RUN]
+04:03:24  2 of 11 PASS stg_orders::stg_orders_dedups_on_order_id ......................... [PASS in 0.23s]
+04:03:24  3 of 11 START sql view model main.stg_orders ................................... [RUN]
+04:03:24  3 of 11 OK created sql view model main.stg_orders .............................. [OK in 0.10s]
+04:03:24  4 of 11 START test not_null_stg_orders_amount .................................. [RUN]
+04:03:24  4 of 11 PASS not_null_stg_orders_amount ........................................ [PASS in 0.06s]
+04:03:24  5 of 11 START test not_null_stg_orders_order_id ................................ [RUN]
+04:03:24  5 of 11 PASS not_null_stg_orders_order_id ...................................... [PASS in 0.03s]
+04:03:24  6 of 11 START test not_null_stg_orders_user_id ................................. [RUN]
+04:03:24  6 of 11 PASS not_null_stg_orders_user_id ....................................... [PASS in 0.03s]
+04:03:24  7 of 11 START test unique_stg_orders_order_id .................................. [RUN]
+04:03:24  7 of 11 PASS unique_stg_orders_order_id ........................................ [PASS in 0.04s]
+04:03:24  8 of 11 START sql table model main.gold_daily_orders ........................... [RUN]
+04:03:25  8 of 11 OK created sql table model main.gold_daily_orders ...................... [OK in 0.09s]
+04:03:25  9 of 11 START test not_null_gold_daily_orders_order_date ....................... [RUN]
+04:03:25  9 of 11 PASS not_null_gold_daily_orders_order_date ............................. [PASS in 0.02s]
+04:03:25  10 of 11 START test not_null_gold_daily_orders_revenue ......................... [RUN]
+04:03:25  10 of 11 PASS not_null_gold_daily_orders_revenue ............................... [PASS in 0.03s]
+04:03:25  11 of 11 START test unique_gold_daily_orders_order_date ........................ [RUN]
+04:03:25  11 of 11 PASS unique_gold_daily_orders_order_date .............................. [PASS in 0.02s]
+04:03:25  
+04:03:25  Finished running 1 seed, 1 table model, 7 data tests, 1 unit test, 1 view model in 0 hours 0 minutes and 0.96 seconds (0.96s).
+04:03:25  
+04:03:25  Completed successfully
+04:03:25
+04:03:25  Done. PASS=11 WARN=0 ERROR=0 SKIP=0 NO-OP=0 TOTAL=11
+..................                                                                   [100%]
+18 passed in 1.37s
+=== verify.py: Day 17 lab smoke test ===
+=== Day 17 pipeline (lite) ===
+  bronze rows in      : 13
+  duplicates dropped  : 5  (Silver dedup)
+  records quarantined : 3  (failed the gate)
+  silver rows         : 8
+  gold daily rows     : 5
+
+Gold (completed orders by day):
+order_date  n_orders  n_users  revenue  avg_order_value
+2026-06-01         2        2    69.49            34.74
+2026-06-02         1        1    19.99            19.99
+2026-06-03         1        1    49.50            49.50
+2026-06-04         1        1     5.00             5.00
+2026-06-06         1        1    49.50            49.50
+  [OK ] extract loaded raw rows
+  [OK ] Silver dropped duplicates (the hook)
+  [OK ] gate quarantined bad records
+  [OK ] Gold produced daily rows
+  [OK ] no duplicate order_id remains in Silver
+  [OK ] streaming consumer is idempotent
+  [OK ] doc->chunk->embedding ingestion
+  [OK ] agent traces flattened into Bronze spans
+  [OK ] eval golden set curated from traces
+  [OK ] decontamination drops eval-overlapping pairs
+2026-06-02         1        1    19.99            19.99
+2026-06-03         1        1    49.50            49.50
+2026-06-04         1        1     5.00             5.00
+2026-06-06         1        1    49.50            49.50
+  [OK ] extract loaded raw rows
+  [OK ] Silver dropped duplicates (the hook)
+  [OK ] gate quarantined bad records
+  [OK ] Gold produced daily rows
+  [OK ] no duplicate order_id remains in Silver
+  [OK ] streaming consumer is idempotent
+  [OK ] doc->chunk->embedding ingestion
+  [OK ] agent traces flattened into Bronze spans
+  [OK ] eval golden set curated from traces
+  [OK ] decontamination drops eval-overlapping pairs
+2026-06-06         1        1    49.50            49.50
+  [OK ] extract loaded raw rows
+  [OK ] Silver dropped duplicates (the hook)
+  [OK ] gate quarantined bad records
+  [OK ] Gold produced daily rows
+  [OK ] no duplicate order_id remains in Silver
+  [OK ] streaming consumer is idempotent
+  [OK ] doc->chunk->embedding ingestion
+  [OK ] agent traces flattened into Bronze spans
+  [OK ] eval golden set curated from traces
+  [OK ] decontamination drops eval-overlapping pairs
+  [OK ] Silver dropped duplicates (the hook)
+  [OK ] gate quarantined bad records
+  [OK ] Gold produced daily rows
+  [OK ] no duplicate order_id remains in Silver
+  [OK ] streaming consumer is idempotent
+  [OK ] doc->chunk->embedding ingestion
+  [OK ] agent traces flattened into Bronze spans
+  [OK ] eval golden set curated from traces
+  [OK ] decontamination drops eval-overlapping pairs
+  [OK ] streaming consumer is idempotent
+  [OK ] doc->chunk->embedding ingestion
+  [OK ] agent traces flattened into Bronze spans
+  [OK ] eval golden set curated from traces
+  [OK ] decontamination drops eval-overlapping pairs
+  [OK ] doc->chunk->embedding ingestion
+  [OK ] agent traces flattened into Bronze spans
+  [OK ] eval golden set curated from traces
+  [OK ] decontamination drops eval-overlapping pairs
+  [OK ] eval golden set curated from traces
+  [OK ] decontamination drops eval-overlapping pairs
+  [OK ] decontamination drops eval-overlapping pairs
+  [OK ] at least one clean preference pair survives
+  [OK ] ASOF point-in-time join avoids future leakage
+  [OK ] knowledge graph built from docs
+  [OK ] graph query answers 'what is returnable?' = widget only
+  [OK ] graph answers a real 2-hop question (widget->accessory->warehouse)
+  [OK ] vector foil: no single chunk answers the multi-hop question
+
+RESULT: 16/16 checks — ALL PASS
